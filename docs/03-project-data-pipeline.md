@@ -1,0 +1,1 @@
+it is vital to have an understanding that, in the ML world, the raw material is data and the choices we make for data have profound downstream consequences on the performance, scalability, and reliability of our entire ML system.
