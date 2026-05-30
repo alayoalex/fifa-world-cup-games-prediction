@@ -61,6 +61,9 @@ Thumbs.db
 .env
 .env.local
 
+# Secrets — contains live API keys; commit only datasources.example.json
+data/raw/datasources.json
+
 # Reports (optional - remove if you want to track reports)
 reports/figures/*
 !reports/figures/.gitkeep

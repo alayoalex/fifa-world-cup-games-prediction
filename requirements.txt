@@ -23,6 +23,12 @@ ipykernel>=6.25.0
 # Data Processing
 openpyxl>=3.1.0  # Excel files
 xlrd>=2.0.1      # Legacy Excel files
+pyarrow>=14.0.0  # Parquet feature store
+
+# Data Acquisition (Phase 2 ETL)
+requests>=2.31.0       # HTTP downloads / API calls
+beautifulsoup4>=4.12.0 # HTML parsing (fixtures, market value)
+lxml>=4.9.0            # fast HTML/XML parser backend for pandas.read_html / bs4
 
 # Utilities
 python-dotenv>=1.0.0  # Environment variables
