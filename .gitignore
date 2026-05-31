@@ -78,3 +78,6 @@ htmlcov/
 .claude/
 smodels/
 data/
+
+# MLflow local tracking store
+/mlflow
