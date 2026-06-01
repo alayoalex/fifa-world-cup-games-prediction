@@ -2,9 +2,9 @@
 Central MLflow configuration for all Phase 3+ experiments.
 
 Single source of truth for:
-  - WHERE run are store (local SQLite store + artifact dir)
-  - WHICH experiment they belong to
-  - HOW run are named: {model}_{feature_set}_{cv}_{date}
+    - WHERE run are store (local SQLite store + artifact dir)
+    - WHICH experiment they belong to
+    - HOW run are named: {model}_{feature_set}_{cv}_{date}
 
 Every traning script calls setup_mlflow() once at startup so the scripts
 and `mlflow ui` always agree on the backend (the #1 "my runs vanished").
@@ -23,7 +23,7 @@ DB_PATH = MLFLOW_DIR / "mlflow.db"
 ARTIFACTS_DIR = MLFLOW_DIR / "artifacts"
 
 TRACKING_URI = f"sqlite:///{DB_PATH.as_posix()}"
-ARTIFACTS_URI = ARTIFACTS_DIR.as_posix()
+ARTIFACTS_URI = ARTIFACTS_DIR.as_uri()
 EXPERIMENT_NAME = "wc2026-prediction"
 
 def setup_mlflow(experiment_name: str = EXPERIMENT_NAME) -> str:
