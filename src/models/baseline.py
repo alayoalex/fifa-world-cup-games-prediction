@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 import numpy as np
 import pandas as pd
-from sklearn.metrics import accuracy_score, log_loss
+from sklearn.metrics import accuracy_score
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # puth src/ on path
 import mlflow
@@ -33,18 +33,21 @@ def multiclass_brier(y_true, proba) -> float:
 
 
 def score(y_true, proba) -> dict:
+    """Log-loss, multiclass Brier, accuracy. `proba` columns MUST be in CLASSES order.
+
+    Log-loss is computed manually against a CLASSES-order one-hot (same convention as
+    multiclass_brier) so we never depend on sklearn's hidden lexicographic label
+    sorting -- the trap that silently swapped H and A.
+    """
+    onehot = pd.get_dummies(pd.Categorical(y_true, categories=CLASSES)).to_numpy()
+    p = np.clip(proba, 1e-15, 1.0)          # avoid log(0)
     pred = np.array(CLASSES)[proba.argmax(axis=1)]
-    # sklearn's log_loss IGNORES the order of `labels` and assumes y_prob columns
-    # are in lexicographic class order. Our columns are CLASSES=[H,D,A], so reorder
-    # BOTH columns and labels to sorted [A,D,H] -- otherwise it silently maps the
-    # wrong probability to each class (and warns).
-    order = np.argsort(CLASSES)                 # [H,D,A] -> [2,1,0] == [A,D,H]
-    sorted_labels = list(np.array(CLASSES)[order])
     return {
-        "logloss": float(log_loss(y_true, proba, labels=sorted_labels)),
+        "logloss": float(-np.mean(np.sum(onehot * np.log(p), axis=1))),
         "brier": multiclass_brier(y_true, proba),
         "accuracy": float(accuracy_score(y_true, pred)),
     }
+
 
 # --- the two strategies (each returns an (n_val, 3) probability array) ---
 def predict_majority(train, val) -> np.ndarray:
