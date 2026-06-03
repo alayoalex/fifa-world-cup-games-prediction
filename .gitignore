@@ -81,3 +81,5 @@ data/
 
 # MLflow local tracking store
 /mlflow
+uv.lock
+docs/assets/prompts.md

@@ -49,14 +49,9 @@ ingest raw → standardize team names → canonical match table → leakage-safe
 ```
 
 1. **Ingest** (`src/etl/sources/*.py`) — download missing sources into `data/raw/`.
-2. **Team-name standardization** (`src/etl/team_names.py`) — the single biggest integration
-   headache: every source spells countries differently ("USA" / "United States",
-   "Korea Republic" / "South Korea", "IR Iran" / "Iran"). One canonical map drives every
-   join. Also maps each team → confederation.
-3. **Canonical match table** (`src/etl/build_match_table.py`) — one row per match across
-   all of history, with standardized names, `neutral` flag, and WC/tournament tags.
-4. **Feature engineering** (`src/features/build_features.py`) — for every match, compute
-   each team's state **using only matches strictly before that match's date**:
+2. **Team-name standardization** (`src/etl/team_names.py`) — the single biggest integration headache: every source spells countries differently ("USA" / "United States", "Korea Republic" / "South Korea", "IR Iran" / "Iran"). One canonical map drives every join. Also maps each team → confederation.
+3. **Canonical match table** (`src/etl/build_match_table.py`) — one row per match across all of history, with standardized names, `neutral` flag, and WC/tournament tags.
+4. **Feature engineering** (`src/features/build_features.py`) — for every match, compute each team's state **using only matches strictly before that match's date**:
    - Elo rating (home/away/diff) — computed incrementally over the corpus
    - FIFA rank (home/away/diff)
    - Recent form: last-N goals for/against, win-rate, with exponential decay
@@ -69,10 +64,7 @@ ingest raw → standardize team names → canonical match table → leakage-safe
 
 ## Non-negotiable guardrail: no temporal leakage
 
-K-fold on temporal data lets the model "see the future". Every engineered feature is
-computed from data **strictly prior** to the match date, so the dataset is safe for the
-time-series split used in Phase 4. Features are built by iterating matches in
-chronological order and snapshotting state *before* applying each result.
+K-fold on temporal data lets the model "see the future". Every engineered feature is computed from data **strictly prior** to the match date, so the dataset is safe for the time-series split used in the next step. Features are built by iterating matches in chronological order and snapshotting state *before* applying each result.
 
 ## Output
 
