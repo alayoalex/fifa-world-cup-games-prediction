@@ -17,10 +17,30 @@ from etl.paths import INTERIM_DIR, WORLDCUP_CSV_DIR  # noqa: E402
 from etl.team_names import standardize_series  # noqa: E402
 
 OUT = INTERIM_DIR / "worldcup_matches.parquet"
+MATCHES_URL = (
+    "https://raw.githubusercontent.com/jfjelstul/worldcup/master/data-csv/matches.csv"
+)
+
+
+def download(force: bool = False) -> Path:
+    """Download jfjelstul World Cup matches.csv into ``data/raw/worldcup/data-csv/``."""
+    dest = WORLDCUP_CSV_DIR / "matches.csv"
+    if dest.exists() and not force:
+        print(f"[worldcup_matches] cached  {dest}")
+        return dest
+
+    print(f"[worldcup_matches] fetching {MATCHES_URL}")
+    df = pd.read_csv(MATCHES_URL)
+    WORLDCUP_CSV_DIR.mkdir(parents=True, exist_ok=True)
+    df.to_csv(dest, index=False)
+    print(f"[worldcup_matches] saved   {dest} ({len(df):,} rows)")
+    return dest
 
 
 def clean() -> pd.DataFrame:
     """Clean jfjelstul men's World Cup matches -> tidy parquet."""
+    if not (WORLDCUP_CSV_DIR / "matches.csv").exists():
+        download()
     df = pd.read_csv(WORLDCUP_CSV_DIR / "matches.csv", parse_dates=["match_date"])
     # Men's tournaments only (women's tournament_ids share the WC-YYYY scheme but for
     # odd years 1991/1995/... — keep the men's editions, which fall on the canonical years).

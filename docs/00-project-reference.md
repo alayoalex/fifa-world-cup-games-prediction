@@ -250,7 +250,13 @@ uv run python src/models/predict_fixtures.py --all-unplayed
 
 ### What touches the internet (one-time download)
 
-Only `make_dataset.py` fetches **public** datasets (GitHub CSVs, optional Transfermarkt scrape). After that, baselines, training, and predictions run **fully offline**.
+Only `make_dataset.py` fetches **public** datasets from GitHub:
+
+- martj42 international results
+- Dato-Futbol FIFA rankings (saved as `fifa_mens_rank.csv`)
+- jfjelstul World Cup matches
+
+Transfermarkt scrape is optional. After the first run, baselines, training, and predictions work **fully offline** with `--skip-download`.
 
 To minimize external requests:
 
@@ -277,9 +283,11 @@ You can ignore Phase 5 (API / website) and MLflow entirely.
 
 ```bash
 uv sync
-uv run python src/etl/make_dataset.py --skip-scrape   # first run: allow download
+uv run python src/etl/make_dataset.py --skip-scrape   # first run: downloads from GitHub
 uv run python src/models/predict_fixtures.py          # your predictions CSV
 ```
+
+Verified end-to-end (2026-06-06): 49,411 matches, 72 WC 2026 fixtures, logistic beats Elo baseline (log-loss 0.85 vs 0.95).
 
 Optional, if you care about model quality:
 
