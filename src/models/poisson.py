@@ -82,8 +82,13 @@ def top_scorelines(matrix: np.ndarray, n: int = 3) -> list[tuple[int, int, float
     return rows
 
 
+def format_score(home_goals: int, away_goals: int) -> str:
+    """Excel-safe score string (avoids '2-0' being parsed as a date)."""
+    return f"{home_goals}x{away_goals}"
+
+
 def format_top_scores(lines: list[tuple[int, int, float]]) -> str:
-    return "|".join(f"{h}-{a}:{p:.3f}" for h, a, p in lines)
+    return "|".join(f"{format_score(h, a)}:{p:.3f}" for h, a, p in lines)
 
 
 def result_from_goals(home_goals: int, away_goals: int) -> str:
@@ -108,9 +113,11 @@ def predict_match(home_model: Pipeline, away_model: Pipeline, X: pd.DataFrame) -
         top = top_scorelines(mat, n=3)
         score_result = result_from_goals(h, a)
         rows.append({
+            "pred_home_goals": h,
+            "pred_away_goals": a,
+            "predicted_score": format_score(h, a),
             "lambda_home": round(float(lh), 3),
             "lambda_away": round(float(la), 3),
-            "predicted_score": f"{h}-{a}",
             "p_score": round(p_score, 4),
             "score_result": score_result,
             "predicted_result": score_result,

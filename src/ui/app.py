@@ -176,11 +176,16 @@ def page_wc_predictions() -> None:
             if out:
                 st.code(out[-2000:])
 
+    st.caption(
+        "Scores use format `2x0` (not `2-0`) so Excel does not convert them to dates. "
+        "Use `pred_home_goals` / `pred_away_goals` for numeric columns."
+    )
+
     df = _load_predictions(WC_PREDICTIONS_FULL, WC_PREDICTIONS)
     if df is None:
         st.info(
             "No predictions yet. Run the data pipeline first, then click "
-            "**Refresh WC predictions**."
+            "**Refresh all predictions**."
         )
         if st.button("Build dataset (first-time setup)"):
             with st.spinner("Downloading data and building features (~1-2 min)..."):
@@ -189,7 +194,7 @@ def page_wc_predictions() -> None:
                 )
             st.code(out[-2000:])
             if ok:
-                st.success("Dataset ready. Now click Refresh WC predictions.")
+                st.success("Dataset ready. Now click Refresh all predictions.")
                 _load_feature_store.clear()
             else:
                 st.error("Pipeline failed. Try without --skip-download if raw data is missing.")
@@ -200,7 +205,8 @@ def page_wc_predictions() -> None:
 
     if "ensemble_pick" in df.columns:
         show_cols = [
-            "date", "home_team", "away_team", "predicted_score",
+            "date", "home_team", "away_team",
+            "pred_home_goals", "pred_away_goals", "predicted_score", "score_result",
             "ensemble_pick", "ensemble_p_H", "ensemble_p_D", "ensemble_p_A",
             "ensemble_confidence", "logreg_pick", "poisson_pick", "top_scores",
         ]
@@ -304,7 +310,8 @@ def page_custom_fixtures() -> None:
         st.markdown("#### Latest predictions")
         if "ensemble_pick" in df.columns:
             cols = [
-                "date", "home_team", "away_team", "predicted_score",
+                "date", "home_team", "away_team",
+                "pred_home_goals", "pred_away_goals", "predicted_score", "score_result",
                 "ensemble_pick", "ensemble_p_H", "ensemble_p_D", "ensemble_p_A", "top_scores",
             ]
             st.dataframe(df[[c for c in cols if c in df.columns]], use_container_width=True, hide_index=True)
@@ -368,9 +375,27 @@ def main() -> None:
         st.write("Full predictions", "✅" if WC_PREDICTIONS_FULL.exists() else "—")
         st.write("Custom predictions", "✅" if CUSTOM_PREDICTIONS_FULL.exists() or CUSTOM_PREDICTIONS.exists() else "—")
         st.divider()
+        st.markdown("**UI → command mapping**")
         st.markdown(
-            "**Offline tip:** after the first `make_dataset.py`, everything runs "
-            "without internet."
+            "- **Refresh all predictions** → `predict_all.py`\n"
+            "- **Full tournament refresh** → `refresh_tournament.py --skip-scrape`\n"
+            "- **Build dataset** → `make_dataset.py`\n"
+            "- **Add & predict** (custom tab) → `add_fixture.py` + `predict_all.py --custom`"
+        )
+        if st.button("Refresh + download new results"):
+            with st.spinner("Fetching latest martj42 data..."):
+                ok, out = _run_script("src/etl/refresh_tournament.py", "--skip-scrape")
+            if ok:
+                st.success("Done.")
+                _load_csv.clear()
+                _load_feature_store.clear()
+            else:
+                st.error("Failed.")
+                st.code(out[-1500:])
+        st.divider()
+        st.markdown(
+            "**Offline tip:** after the first `make_dataset.py`, use "
+            "**Full tournament refresh** without the download button."
         )
 
     tab_wc, tab_custom, tab_teams = st.tabs([

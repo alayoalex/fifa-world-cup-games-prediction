@@ -74,7 +74,8 @@ def _save_and_print(preds: pd.DataFrame, output: Path, label: str) -> pd.DataFra
     preds.to_csv(output, index=False)
     print(f"[predict_all] {len(preds)} {label} fixtures -> {output}")
     show_cols = [
-        "date", "home_team", "away_team", "predicted_score", "score_result",
+        "date", "home_team", "away_team",
+        "pred_home_goals", "pred_away_goals", "predicted_score", "score_result",
         "ensemble_pick", "ensemble_p_H", "ensemble_p_D", "ensemble_p_A",
     ]
     show = preds[[c for c in show_cols if c in preds.columns]]
