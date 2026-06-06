@@ -23,8 +23,12 @@ sys.path.insert(0, str(SRC_DIR))
 from etl import custom_fixtures  # noqa: E402
 from etl.paths import PROCESSED_DIR  # noqa: E402
 
+WC_PREDICTIONS_FULL = PROCESSED_DIR / "wc2026_predictions_full.csv"
 WC_PREDICTIONS = PROCESSED_DIR / "wc2026_predictions.csv"
+WC_SCORES = PROCESSED_DIR / "wc2026_score_predictions.csv"
+CUSTOM_PREDICTIONS_FULL = PROCESSED_DIR / "custom_predictions_full.csv"
 CUSTOM_PREDICTIONS = PROCESSED_DIR / "custom_predictions.csv"
+CUSTOM_SCORES = PROCESSED_DIR / "custom_score_predictions.csv"
 FEATURE_STORE = PROCESSED_DIR / "matches_features.parquet"
 ELO_HISTORY = PROCESSED_DIR / "elo_history.parquet"
 
@@ -68,15 +72,29 @@ def _dataset_ready() -> bool:
     return FEATURE_STORE.exists()
 
 
-def _prob_chart(df: pd.DataFrame, title: str) -> None:
+def _load_predictions(primary: Path, fallback: Path | None = None) -> pd.DataFrame | None:
+    df = _load_csv(str(primary))
+    if df is not None:
+        return df
+    if fallback is not None:
+        return _load_csv(str(fallback))
+    return None
+
+
+def _prob_chart(df: pd.DataFrame, title: str, *, prefix: str = "ensemble") -> None:
+    pick_col = f"{prefix}_pick" if f"{prefix}_pick" in df.columns else "predicted"
+    p_cols = [f"{prefix}_p_{c}" for c in ("H", "D", "A")]
+    if not all(c in df.columns for c in p_cols):
+        p_cols = ["p_H", "p_D", "p_A"]
+        pick_col = "predicted"
     long = df.melt(
-        id_vars=["home_team", "away_team", "date", "predicted"],
-        value_vars=["p_H", "p_D", "p_A"],
+        id_vars=["home_team", "away_team", "date", pick_col],
+        value_vars=p_cols,
         var_name="outcome",
         value_name="probability",
     )
     long["match"] = long["home_team"] + " vs " + long["away_team"]
-    long["outcome"] = long["outcome"].str.replace("p_", "")
+    long["outcome"] = long["outcome"].str.replace(r"^(ensemble_|logreg_|poisson_)?p_", "", regex=True)
     fig = px.bar(
         long,
         x="match",
@@ -133,18 +151,32 @@ def page_wc_predictions() -> None:
     st.subheader("World Cup 2026 — group stage")
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("Refresh WC predictions", type="primary"):
-            with st.spinner("Training model and scoring fixtures..."):
-                ok, out = _run_script("src/models/predict_fixtures.py")
+        if st.button("Refresh all predictions", type="primary"):
+            with st.spinner("Logistic + Poisson + ensemble..."):
+                ok, out = _run_script("src/models/predict_all.py")
             if ok:
-                st.success("Predictions updated.")
+                st.success("Full predictions updated.")
                 _load_csv.clear()
             else:
                 st.error("Prediction failed.")
             if out:
                 st.code(out[-2000:])
+    with col2:
+        if st.button("Full tournament refresh"):
+            with st.spinner("Download results, rebuild features, predict..."):
+                ok, out = _run_script(
+                    "src/etl/refresh_tournament.py", "--skip-scrape"
+                )
+            if ok:
+                st.success("Tournament data and predictions refreshed.")
+                _load_csv.clear()
+                _load_feature_store.clear()
+            else:
+                st.error("Refresh failed.")
+            if out:
+                st.code(out[-2000:])
 
-    df = _load_csv(str(WC_PREDICTIONS))
+    df = _load_predictions(WC_PREDICTIONS_FULL, WC_PREDICTIONS)
     if df is None:
         st.info(
             "No predictions yet. Run the data pipeline first, then click "
@@ -163,13 +195,38 @@ def page_wc_predictions() -> None:
                 st.error("Pipeline failed. Try without --skip-download if raw data is missing.")
         return
 
-    st.caption(f"{len(df)} fixtures — source: `{WC_PREDICTIONS.name}`")
-    st.dataframe(
-        df[["date", "home_team", "away_team", "predicted", "p_H", "p_D", "p_A", "confidence"]],
-        use_container_width=True,
-        hide_index=True,
-    )
-    _prob_chart(df, "WC 2026 outcome probabilities")
+    source = WC_PREDICTIONS_FULL.name if WC_PREDICTIONS_FULL.exists() else WC_PREDICTIONS.name
+    st.caption(f"{len(df)} fixtures — source: `{source}`")
+
+    if "ensemble_pick" in df.columns:
+        show_cols = [
+            "date", "home_team", "away_team", "predicted_score",
+            "ensemble_pick", "ensemble_p_H", "ensemble_p_D", "ensemble_p_A",
+            "ensemble_confidence", "logreg_pick", "poisson_pick", "top_scores",
+        ]
+        show_cols = [c for c in show_cols if c in df.columns]
+        st.dataframe(df[show_cols], use_container_width=True, hide_index=True)
+        _prob_chart(df, "Ensemble outcome probabilities", prefix="ensemble")
+    else:
+        st.dataframe(
+            df[["date", "home_team", "away_team", "predicted", "p_H", "p_D", "p_A", "confidence"]],
+            use_container_width=True,
+            hide_index=True,
+        )
+        _prob_chart(df, "WC 2026 outcome probabilities")
+
+    if "predicted_score" not in df.columns:
+        scores = _load_csv(str(WC_SCORES))
+        if scores is not None:
+            st.markdown("#### Predicted scorelines (Poisson)")
+            st.dataframe(
+                scores[
+                    ["date", "home_team", "away_team", "predicted_score",
+                     "lambda_home", "lambda_away", "p_score", "top_scores"]
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
 
 
 def page_custom_fixtures() -> None:
@@ -208,14 +265,15 @@ def page_custom_fixtures() -> None:
                     *(["--home-advantage"] if not neutral else []),
                     "--predict",
                 )
+                ok2, out2 = _run_script("src/models/predict_all.py", "--custom")
             _load_csv.clear()
             _load_feature_store.clear()
-            if ok:
+            if ok and ok2:
                 st.success(f"Scored: {home} vs {away}")
             else:
                 st.error("Failed to add or predict.")
-            if out:
-                st.code(out[-2000:])
+            if out or out2:
+                st.code((out + "\n" + out2)[-2000:])
 
     stored = custom_fixtures.list_fixtures()
     st.markdown("#### Saved custom fixtures")
@@ -241,16 +299,24 @@ def page_custom_fixtures() -> None:
                 st.error("Remove failed.")
                 st.code(out[-2000:])
 
-    df = _load_csv(str(CUSTOM_PREDICTIONS))
+    df = _load_predictions(CUSTOM_PREDICTIONS_FULL, CUSTOM_PREDICTIONS)
     if df is not None and not df.empty:
         st.markdown("#### Latest predictions")
-        st.dataframe(
-            df[["date", "home_team", "away_team", "predicted", "p_H", "p_D", "p_A", "confidence"]],
-            use_container_width=True,
-            hide_index=True,
-        )
+        if "ensemble_pick" in df.columns:
+            cols = [
+                "date", "home_team", "away_team", "predicted_score",
+                "ensemble_pick", "ensemble_p_H", "ensemble_p_D", "ensemble_p_A", "top_scores",
+            ]
+            st.dataframe(df[[c for c in cols if c in df.columns]], use_container_width=True, hide_index=True)
+        else:
+            st.dataframe(
+                df[["date", "home_team", "away_team", "predicted", "p_H", "p_D", "p_A", "confidence"]],
+                use_container_width=True,
+                hide_index=True,
+            )
         if len(df) <= 12:
-            _prob_chart(df, "Custom fixture probabilities")
+            prefix = "ensemble" if "ensemble_pick" in df.columns else "ensemble"
+            _prob_chart(df, "Custom fixture probabilities", prefix=prefix)
 
 
 def page_teams() -> None:
@@ -299,8 +365,8 @@ def main() -> None:
         st.header("Status")
         ready = _dataset_ready()
         st.write("Dataset", "✅ ready" if ready else "❌ missing")
-        st.write("WC predictions", "✅" if WC_PREDICTIONS.exists() else "—")
-        st.write("Custom predictions", "✅" if CUSTOM_PREDICTIONS.exists() else "—")
+        st.write("Full predictions", "✅" if WC_PREDICTIONS_FULL.exists() else "—")
+        st.write("Custom predictions", "✅" if CUSTOM_PREDICTIONS_FULL.exists() or CUSTOM_PREDICTIONS.exists() else "—")
         st.divider()
         st.markdown(
             "**Offline tip:** after the first `make_dataset.py`, everything runs "

@@ -323,9 +323,42 @@ uv run streamlit run src/ui/app.py
 
 Tabs: WC 2026 predictions, custom hypothetical matches, team Elo explorer.
 
-### What is NOT covered yet (personal mode gaps)
+### Unified predictions (recommended)
 
-- **Goal-score predictions** (e.g. 2-1) — only W/D/L probabilities today; Poisson is planned.
+Single command — logistic + Poisson + **ensemble** in one CSV:
+
+```bash
+uv run python src/models/predict_all.py
+uv run python src/models/predict_all.py --custom
+```
+
+**Output:** `data/processed/wc2026_predictions_full.csv` with scorelines, per-model picks, and `ensemble_pick` / `ensemble_p_*`.
+
+### Tournament refresh (during the World Cup)
+
+After each matchday, pull latest results and regenerate everything:
+
+```bash
+uv run python src/etl/refresh_tournament.py --skip-scrape
+uv run python src/etl/refresh_tournament.py --skip-download --skip-scrape   # offline
+```
+
+### Ensemble model
+
+Blends logistic (55%) + Poisson outcome probs (45%) by default:
+
+```bash
+uv run python src/models/ensemble.py   # optional: evaluate temporal CV
+```
+
+### Scoreline predictions (Poisson only)
+
+```bash
+uv run python src/models/poisson.py
+uv run python src/models/predict_scores.py
+```
+
+`predicted_result` now matches the modal scoreline (`1-1` → `D`). `outcome_pick` is the aggregated 3-way max.
 
 ---
 
@@ -367,7 +400,9 @@ See [`01-project-general.md`](./01-project-general.md) and [`sports-ml-models.md
 ```bash
 uv sync                                              # install deps
 uv run python src/etl/make_dataset.py                # build dataset (downloads once)
-uv run python src/models/predict_fixtures.py         # local WC predictions → CSV
+uv run python src/models/predict_all.py              # unified predictions (recommended)
+uv run python src/etl/refresh_tournament.py --skip-scrape  # tournament refresh
+uv run python src/models/ensemble.py                 # optional: evaluate ensemble
 uv run python src/models/baseline.py                 # optional: baselines
 uv run python src/models/logistic.py                 # optional: train + MLflow log
 uv run mlflow ui --backend-store-uri "sqlite:///mlflow/mlflow.db"  # optional UI
