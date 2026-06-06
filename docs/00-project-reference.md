@@ -312,10 +312,20 @@ uv run python src/etl/add_fixture.py remove --id <fixture_id> --rebuild
 
 Team names are validated against the martj42 vocabulary (aliases like `USA` → `United States` work). Default match date is the day after the latest played match in the corpus.
 
+### Local UI (Streamlit)
+
+Interactive browser UI — still 100% local:
+
+```bash
+uv sync
+uv run streamlit run src/ui/app.py
+```
+
+Tabs: WC 2026 predictions, custom hypothetical matches, team Elo explorer.
+
 ### What is NOT covered yet (personal mode gaps)
 
 - **Goal-score predictions** (e.g. 2-1) — only W/D/L probabilities today; Poisson is planned.
-- **GUI / web dashboard** — planned later; today use CSV or CLI.
 
 ---
 
@@ -361,6 +371,7 @@ uv run python src/models/predict_fixtures.py         # local WC predictions → 
 uv run python src/models/baseline.py                 # optional: baselines
 uv run python src/models/logistic.py                 # optional: train + MLflow log
 uv run mlflow ui --backend-store-uri "sqlite:///mlflow/mlflow.db"  # optional UI
+uv run streamlit run src/ui/app.py                  # local browser UI
 ```
 
 ---
