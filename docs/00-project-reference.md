@@ -296,11 +296,26 @@ uv run python src/models/baseline.py
 uv run python src/models/logistic.py
 ```
 
+### Custom hypothetical matches
+
+Add any pairing of known national teams, rebuild features, and predict locally:
+
+```bash
+uv run python src/etl/add_fixture.py add --home Spain --away Brazil --predict
+uv run python src/etl/add_fixture.py add --home Argentina --away France --date 2026-07-15
+uv run python src/etl/add_fixture.py list
+uv run python src/etl/add_fixture.py predict
+uv run python src/etl/add_fixture.py remove --id <fixture_id> --rebuild
+```
+
+**Output:** `data/processed/custom_predictions.csv`
+
+Team names are validated against the martj42 vocabulary (aliases like `USA` → `United States` work). Default match date is the day after the latest played match in the corpus.
+
 ### What is NOT covered yet (personal mode gaps)
 
-- **Custom hypothetical matches** (e.g. "Spain vs Brazil") — fixtures must exist in the corpus or you add rows manually to the pipeline.
 - **Goal-score predictions** (e.g. 2-1) — only W/D/L probabilities today; Poisson is planned.
-- **GUI / web dashboard** — use CSV + Excel, Jupyter, or your own local tool.
+- **GUI / web dashboard** — planned later; today use CSV or CLI.
 
 ---
 
