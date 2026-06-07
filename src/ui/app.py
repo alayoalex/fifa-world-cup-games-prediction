@@ -23,6 +23,7 @@ sys.path.insert(0, str(SRC_DIR))
 from etl import custom_fixtures  # noqa: E402
 from etl.paths import INTERIM_DIR, PROCESSED_DIR  # noqa: E402
 from etl.record_result import LIVE_RESULTS_PATH, list_results, record_result  # noqa: E402
+from models.simulate_tournament import SIMULATION_PATH, ROUND_ORDER, simulate_tournament, save_simulation  # noqa: E402
 
 WC_PREDICTIONS_FULL = PROCESSED_DIR / "wc2026_predictions_full.csv"
 WC_PREDICTIONS = PROCESSED_DIR / "wc2026_predictions.csv"
@@ -378,6 +379,99 @@ def _next_fixture(df: pd.DataFrame) -> pd.Series | None:
     return unplayed.iloc[0] if not unplayed.empty else None
 
 
+@st.cache_data(ttl=60)
+def _load_simulation() -> pd.DataFrame | None:
+    if not SIMULATION_PATH.exists():
+        return None
+    return pd.read_csv(SIMULATION_PATH)
+
+
+def page_simulation() -> None:
+    st.subheader("Simulacion del torneo — Monte Carlo")
+    st.caption("10.000 simulaciones del bracket completo usando las probabilidades del ensemble.")
+
+    sim = _load_simulation()
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Simular torneo (10.000 runs)", type="primary"):
+            with st.spinner("Corriendo 10.000 simulaciones..."):
+                try:
+                    df = simulate_tournament(n_sims=10_000)
+                    save_simulation(df)
+                    _load_simulation.clear()
+                    st.success("Simulacion completada.")
+                    st.rerun()
+                except FileNotFoundError as e:
+                    st.error(str(e))
+    with col2:
+        if st.button("Simular rapido (3.000 runs)"):
+            with st.spinner("Corriendo 3.000 simulaciones..."):
+                try:
+                    df = simulate_tournament(n_sims=3_000)
+                    save_simulation(df)
+                    _load_simulation.clear()
+                    st.success("Listo.")
+                    st.rerun()
+                except FileNotFoundError as e:
+                    st.error(str(e))
+
+    if sim is None:
+        st.info("Todavia no hay simulacion. Hace click en 'Simular torneo' para generarla.")
+        return
+
+    # --- Tabla principal ---
+    st.markdown("### Probabilidades por equipo")
+    display_cols = {
+        "rank": "#", "team": "Equipo", "group": "Grupo",
+        "Round of 24": "Pasa grupos",
+        "Round of 16": "Octavos",
+        "Quarterfinal": "Cuartos",
+        "Semifinal": "Semifinal",
+        "Final": "Final",
+        "Champion": "CAMPEON",
+    }
+    show = sim[[c for c in display_cols if c in sim.columns]].rename(columns=display_cols)
+    pct_cols = [v for k, v in display_cols.items() if k not in ("rank", "team", "group")]
+    for col in pct_cols:
+        if col in show.columns:
+            show[col] = show[col].apply(lambda x: f"{x:.1%}")
+    st.dataframe(show, use_container_width=True, hide_index=True)
+
+    # --- Chart: top 16 por probabilidad de campeon ---
+    st.markdown("### Top 16 — Probabilidad de ser campeon")
+    top16 = sim.head(16).copy()
+    fig = px.bar(
+        top16,
+        x="team", y="Champion",
+        color="group",
+        labels={"Champion": "P(Campeon)", "team": "Equipo", "group": "Grupo"},
+        text=top16["Champion"].apply(lambda x: f"{x:.1%}"),
+    )
+    fig.update_layout(xaxis_tickangle=-35, height=420, showlegend=True)
+    fig.update_traces(textposition="outside")
+    st.plotly_chart(fig, use_container_width=True)
+
+    # --- Chart: probabilidad por ronda para un equipo seleccionado ---
+    st.markdown("### Camino de un equipo")
+    teams = sim["team"].tolist()
+    default = teams.index("Argentina") if "Argentina" in teams else 0
+    selected = st.selectbox("Selecciona un equipo", teams, index=default)
+    row = sim[sim["team"] == selected].iloc[0]
+    rounds_display = ["Round of 24", "Round of 16", "Quarterfinal", "Semifinal", "Final", "Champion"]
+    round_labels = ["Pasa grupos", "Octavos", "Cuartos", "Semifinal", "Final", "Campeon"]
+    probs = [row[r] for r in rounds_display if r in row]
+    fig2 = px.bar(
+        x=round_labels[:len(probs)], y=probs,
+        labels={"x": "Ronda", "y": "Probabilidad"},
+        title=f"{selected} — probabilidad de llegar a cada ronda",
+        text=[f"{p:.1%}" for p in probs],
+    )
+    fig2.update_layout(height=360, yaxis_tickformat=".0%")
+    fig2.update_traces(textposition="outside", marker_color="#1f77b4")
+    st.plotly_chart(fig2, use_container_width=True)
+
+
 def page_live_results() -> None:
     st.subheader("Resultados en vivo — Mundial 2026")
 
@@ -549,14 +643,17 @@ def main() -> None:
             "**Full tournament refresh** without the download button."
         )
 
-    tab_live, tab_wc, tab_custom, tab_teams = st.tabs([
+    tab_live, tab_sim, tab_wc, tab_custom, tab_teams = st.tabs([
         "Resultados en vivo",
+        "Simulacion del torneo",
         "WC 2026 fixtures",
         "Custom matches",
         "Team explorer",
     ])
     with tab_live:
         page_live_results()
+    with tab_sim:
+        page_simulation()
     with tab_wc:
         page_wc_predictions()
     with tab_custom:
