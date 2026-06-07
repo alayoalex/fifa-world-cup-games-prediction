@@ -45,8 +45,7 @@ FEATURES = [
     "form_ga_away",
     "fifa_rank_diff",
     "h2h_home_winrate",
-    "rest_days_diff",''
-    "mv_log_ratio",
+    "rest_days_diff",
     "neutral",
     "same_confederation",
 ]

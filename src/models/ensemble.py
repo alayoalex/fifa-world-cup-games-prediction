@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from etl.paths import PROCESSED_DIR
 from models.baseline import CLASSES, score
 from models.logistic import FEATURES, build_pipeline as build_logreg, predict_proba_ordered
-from models.poisson import build_pipeline as build_poisson, fit_models, outcome_probs, score_matrix
+from models.poisson import build_pipeline as build_poisson, fit_models, outcome_probs, score_matrix, DEFAULT_RHO
 from models.splits import DEFAULT_VAL_YEARS, temporal_folds
 from models.tracking import make_run_name, setup_mlflow
 
@@ -38,11 +38,11 @@ def blend_proba(logreg_proba: np.ndarray, poisson_proba: np.ndarray, w: float) -
     return blended / row_sums
 
 
-def poisson_proba_matrix(home_model, away_model, X: pd.DataFrame) -> np.ndarray:
+def poisson_proba_matrix(home_model, away_model, X: pd.DataFrame, rho: float = DEFAULT_RHO) -> np.ndarray:
     lam_h = home_model.predict(X)
     lam_a = away_model.predict(X)
     return np.array([
-        [outcome_probs(score_matrix(lh, la))[c] for c in CLASSES]
+        [outcome_probs(score_matrix(lh, la, rho=rho))[c] for c in CLASSES]
         for lh, la in zip(lam_h, lam_a)
     ])
 
@@ -54,6 +54,7 @@ def predict_ensemble_proba(
     logreg_weight: float = DEFAULT_LOGREG_WEIGHT,
     logreg_C: float = 1.0,
     poisson_alpha: float = 0.1,
+    rho: float = DEFAULT_RHO,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return (logreg, poisson, ensemble) probability arrays for fixtures."""
     played = df[df["played"]]
@@ -64,7 +65,7 @@ def predict_ensemble_proba(
     home_m, away_m = fit_models(df, alpha=poisson_alpha)
 
     p_log = predict_proba_ordered(logreg, X_fix)
-    p_poi = poisson_proba_matrix(home_m, away_m, X_fix)
+    p_poi = poisson_proba_matrix(home_m, away_m, X_fix, rho=rho)
     p_ens = blend_proba(p_log, p_poi, logreg_weight)
     return p_log, p_poi, p_ens
 

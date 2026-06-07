@@ -21,7 +21,8 @@ SRC_DIR = PROJECT_DIR / "src"
 sys.path.insert(0, str(SRC_DIR))
 
 from etl import custom_fixtures  # noqa: E402
-from etl.paths import PROCESSED_DIR  # noqa: E402
+from etl.paths import INTERIM_DIR, PROCESSED_DIR  # noqa: E402
+from etl.record_result import LIVE_RESULTS_PATH, list_results, record_result  # noqa: E402
 
 WC_PREDICTIONS_FULL = PROCESSED_DIR / "wc2026_predictions_full.csv"
 WC_PREDICTIONS = PROCESSED_DIR / "wc2026_predictions.csv"
@@ -359,6 +360,156 @@ def page_teams() -> None:
             st.plotly_chart(fig, use_container_width=True)
 
 
+@st.cache_data(ttl=30)
+def _load_live_results() -> pd.DataFrame | None:
+    if not LIVE_RESULTS_PATH.exists():
+        return None
+    return pd.read_parquet(LIVE_RESULTS_PATH)
+
+
+def _next_fixture(df: pd.DataFrame) -> pd.Series | None:
+    """Return the next unplayed WC fixture by date."""
+    today = pd.Timestamp.now().normalize()
+    unplayed = df[
+        ~df["played"] &
+        (df["tournament"] == "FIFA World Cup") &
+        (df["date"] >= today)
+    ].sort_values("date")
+    return unplayed.iloc[0] if not unplayed.empty else None
+
+
+def page_live_results() -> None:
+    st.subheader("Resultados en vivo — Mundial 2026")
+
+    features = _load_feature_store()
+    preds = _load_predictions(WC_PREDICTIONS_FULL, WC_PREDICTIONS)
+
+    # --- Próximo partido destacado ---
+    st.markdown("### Próximo partido")
+    if features is not None and preds is not None:
+        nxt = _next_fixture(features)
+        if nxt is not None:
+            home, away = nxt["home_team"], nxt["away_team"]
+            match_preds = preds[
+                (preds["home_team"] == home) & (preds["away_team"] == away)
+            ]
+            col1, col2, col3 = st.columns([2, 1, 2])
+            col1.metric(home, "")
+            col2.markdown(f"<h2 style='text-align:center'>{nxt['date'].strftime('%d %b')}<br>VS</h2>", unsafe_allow_html=True)
+            col3.metric(away, "")
+            if not match_preds.empty:
+                r = match_preds.iloc[0]
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Gana local", f"{r.get('ensemble_p_H', r.get('p_H', 0)):.1%}")
+                c2.metric("Empate", f"{r.get('ensemble_p_D', r.get('p_D', 0)):.1%}")
+                c3.metric("Gana visitante", f"{r.get('ensemble_p_A', r.get('p_A', 0)):.1%}")
+                pick = r.get("ensemble_pick", r.get("predicted", "?"))
+                label = {"H": f"Gana {home}", "D": "Empate", "A": f"Gana {away}"}.get(pick, pick)
+                c4.metric("Prediccion", label)
+                score_col = r.get("predicted_score", "—")
+                top = r.get("top_scores", "")
+                st.caption(f"Marcador mas probable: **{score_col}** | Top 3: {top}")
+        else:
+            st.info("No hay partidos pendientes.")
+    else:
+        st.info("Generá las predicciones primero desde el tab 'WC 2026 fixtures'.")
+
+    st.divider()
+
+    # --- Formulario ingreso manual ---
+    st.markdown("### Registrar resultado real")
+    if features is None:
+        st.warning("Dataset no disponible. Construilo desde el tab WC 2026.")
+        return
+
+    wc_fixtures = features[
+        ~features["played"] &
+        (features["tournament"] == "FIFA World Cup")
+    ].sort_values("date")
+
+    if wc_fixtures.empty:
+        st.success("Todos los partidos del Mundial ya tienen resultado registrado.")
+    else:
+        fixture_labels = [
+            f"{row['date'].strftime('%d %b')} — {row['home_team']} vs {row['away_team']}"
+            for _, row in wc_fixtures.iterrows()
+        ]
+        fixture_map = {
+            label: row
+            for label, (_, row) in zip(fixture_labels, wc_fixtures.iterrows())
+        }
+
+        with st.form("record_result_form"):
+            selected = st.selectbox("Partido jugado", fixture_labels)
+            c1, c2, c3 = st.columns(3)
+            home_goals = c1.number_input("Goles local", min_value=0, max_value=20, value=0, step=1)
+            c2.markdown("<div style='text-align:center;padding-top:28px;font-size:20px'>—</div>", unsafe_allow_html=True)
+            away_goals = c3.number_input("Goles visitante", min_value=0, max_value=20, value=0, step=1)
+            submitted = st.form_submit_button("Registrar y re-predecir", type="primary")
+
+        if submitted:
+            row = fixture_map[selected]
+            with st.spinner(f"Registrando {row['home_team']} {home_goals}-{away_goals} {row['away_team']} y recalculando..."):
+                try:
+                    result = record_result(
+                        home_team=row["home_team"],
+                        away_team=row["away_team"],
+                        home_score=int(home_goals),
+                        away_score=int(away_goals),
+                        match_date=row["date"],
+                        rebuild=True,
+                        predict=True,
+                    )
+                    if result["status"] == "duplicate":
+                        st.warning("Este resultado ya estaba registrado.")
+                    else:
+                        lbl = {"H": f"Victoria {row['home_team']}", "D": "Empate", "A": f"Victoria {row['away_team']}"}.get(result["result"], result["result"])
+                        st.success(f"Registrado: {row['home_team']} {home_goals}-{away_goals} {row['away_team']} — {lbl}")
+                        _load_csv.clear()
+                        _load_feature_store.clear()
+                        _load_live_results.clear()
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"Error al registrar: {e}")
+
+    # --- Auto-refresh desde martj42 ---
+    st.divider()
+    st.markdown("### Auto-descarga de resultados")
+    st.caption("Descarga los últimos resultados de martj42 (GitHub) y reconstruye todo. Requiere internet.")
+    if st.button("Descargar resultados nuevos y re-predecir", type="secondary"):
+        with st.spinner("Descargando de martj42 y reconstruyendo (~1-2 min)..."):
+            ok, out = _run_script("src/etl/refresh_tournament.py", "--skip-scrape")
+        if ok:
+            st.success("Actualizado con los ultimos resultados.")
+            _load_csv.clear()
+            _load_feature_store.clear()
+            _load_live_results.clear()
+        else:
+            st.error("Fallo la descarga.")
+            st.code(out[-2000:])
+
+    # --- Historial de resultados registrados ---
+    st.divider()
+    st.markdown("### Resultados registrados manualmente")
+    live = _load_live_results()
+    if live is None or live.empty:
+        st.caption("Ninguno aún.")
+    else:
+        show = live.copy()
+        show["score"] = show["home_score"].astype(int).astype(str) + "-" + show["away_score"].astype(int).astype(str)
+        show["result"] = show.apply(
+            lambda r: {"H": "Victoria local", "D": "Empate", "A": "Victoria visitante"}.get(
+                "H" if r["home_score"] > r["away_score"] else "A" if r["home_score"] < r["away_score"] else "D", ""
+            ), axis=1
+        )
+        show["date"] = pd.to_datetime(show["date"]).dt.strftime("%d %b %Y")
+        st.dataframe(
+            show[["date", "home_team", "score", "away_team", "result"]],
+            use_container_width=True,
+            hide_index=True,
+        )
+
+
 def main() -> None:
     st.set_page_config(
         page_title="WC 2026 Predictions",
@@ -398,11 +549,14 @@ def main() -> None:
             "**Full tournament refresh** without the download button."
         )
 
-    tab_wc, tab_custom, tab_teams = st.tabs([
+    tab_live, tab_wc, tab_custom, tab_teams = st.tabs([
+        "Resultados en vivo",
         "WC 2026 fixtures",
         "Custom matches",
         "Team explorer",
     ])
+    with tab_live:
+        page_live_results()
     with tab_wc:
         page_wc_predictions()
     with tab_custom:

@@ -27,6 +27,7 @@ from models.ensemble import DEFAULT_LOGREG_WEIGHT, predict_ensemble_proba
 from models.logistic import FEATURES, build_pipeline as build_logreg, predict_proba_ordered
 from models.poisson import fit_models, predict_match
 from models.predict_fixtures import _pick_custom_fixtures, _pick_fixtures
+from models.tune import load_best_params
 
 WC_OUTPUT = PROCESSED_DIR / "wc2026_predictions_full.csv"
 CUSTOM_OUTPUT = PROCESSED_DIR / "custom_predictions_full.csv"
@@ -46,6 +47,7 @@ def predict_full(
     logreg_weight: float = DEFAULT_LOGREG_WEIGHT,
     logreg_C: float = 1.0,
     poisson_alpha: float = 0.1,
+    rho: float = 0.10,
 ) -> pd.DataFrame:
     """Build the full prediction table for a fixture set."""
     meta = fixtures[
@@ -57,6 +59,7 @@ def predict_full(
         logreg_weight=logreg_weight,
         logreg_C=logreg_C,
         poisson_alpha=poisson_alpha,
+        rho=rho,
     )
 
     logreg_df = _proba_frame("logreg", p_log, "logreg_pick")
@@ -64,7 +67,7 @@ def predict_full(
     ensemble_df = _proba_frame("ensemble", p_ens, "ensemble_pick")
 
     home_m, away_m = fit_models(df, alpha=poisson_alpha)
-    scores = predict_match(home_m, away_m, fixtures[FEATURES].astype(float))
+    scores = predict_match(home_m, away_m, fixtures[FEATURES].astype(float), rho=rho)
 
     return pd.concat([meta, scores, logreg_df, poisson_df, ensemble_df], axis=1)
 
@@ -130,20 +133,27 @@ def main() -> None:
     parser.add_argument("--year", type=int, default=2026)
     parser.add_argument("--all-unplayed", action="store_true")
     parser.add_argument("--output", type=Path, default=None)
-    parser.add_argument("--logreg-weight", type=float, default=DEFAULT_LOGREG_WEIGHT)
+    parser.add_argument("--logreg-weight", type=float, default=None)
     args = parser.parse_args()
+
+    # Use tuned params if available, otherwise defaults
+    params = load_best_params()
+    logreg_weight = args.logreg_weight if args.logreg_weight is not None else params.get("logreg_weight", DEFAULT_LOGREG_WEIGHT)
+    logreg_C = params.get("C", 1.0)
+    poisson_alpha = params.get("alpha", 0.1)
+    rho = params.get("rho", 0.10)
 
     if args.custom:
         predict_custom(
             output=args.output or CUSTOM_OUTPUT,
-            logreg_weight=args.logreg_weight,
+            logreg_weight=logreg_weight,
         )
     else:
         predict_wc(
             year=None if args.all_unplayed else args.year,
             tournament_only=not args.all_unplayed,
             output=args.output or WC_OUTPUT,
-            logreg_weight=args.logreg_weight,
+            logreg_weight=logreg_weight,
         )
 
 

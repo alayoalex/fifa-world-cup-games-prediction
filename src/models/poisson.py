@@ -34,6 +34,42 @@ from models.splits import DEFAULT_VAL_YEARS, temporal_folds
 from models.tracking import make_run_name, setup_mlflow
 
 MAX_GOALS = 6
+# Dixon-Coles correction for low-scoring results (0-0, 1-0, 0-1, 1-1).
+# rho=0 disables the correction; typical values in football literature: 0.05-0.15.
+DEFAULT_RHO = 0.10
+
+
+def dixon_coles_correction(matrix: np.ndarray, lam_h: float, lam_a: float, rho: float) -> np.ndarray:
+    """Apply Dixon-Coles (1997) correction to the 2x2 low-score corner of a score matrix.
+
+    The correction adjusts P(0-0), P(1-0), P(0-1), P(1-1) by a factor tau that accounts
+    for the empirical under/over-representation of these scorelines relative to independent
+    Poisson predictions. The rest of the matrix is rescaled to keep probabilities summing to 1.
+    """
+    if rho == 0.0:
+        return matrix
+    matrix = matrix.copy()
+    lh, la = max(float(lam_h), 1e-6), max(float(lam_a), 1e-6)
+
+    def tau(h: int, a: int) -> float:
+        if h == 0 and a == 0:
+            return 1.0 - lh * la * rho
+        if h == 1 and a == 0:
+            return 1.0 + la * rho
+        if h == 0 and a == 1:
+            return 1.0 + lh * rho
+        if h == 1 and a == 1:
+            return 1.0 - rho
+        return 1.0
+
+    for i in range(min(2, matrix.shape[0])):
+        for j in range(min(2, matrix.shape[1])):
+            matrix[i, j] *= tau(i, j)
+
+    total = matrix.sum()
+    if total > 0:
+        matrix /= total
+    return matrix
 
 
 def build_pipeline(alpha: float = 0.1) -> Pipeline:
@@ -45,12 +81,13 @@ def build_pipeline(alpha: float = 0.1) -> Pipeline:
     ])
 
 
-def score_matrix(lam_home: float, lam_away: float, max_goals: int = MAX_GOALS) -> np.ndarray:
-    """(max_goals+1) x (max_goals+1) matrix of P(home=h, away=a)."""
+def score_matrix(lam_home: float, lam_away: float, max_goals: int = MAX_GOALS, rho: float = DEFAULT_RHO) -> np.ndarray:
+    """(max_goals+1) x (max_goals+1) matrix of P(home=h, away=a) with Dixon-Coles correction."""
     lam_home = max(float(lam_home), 1e-6)
     lam_away = max(float(lam_away), 1e-6)
     goals = np.arange(max_goals + 1)
-    return np.outer(poisson.pmf(goals, lam_home), poisson.pmf(goals, lam_away))
+    matrix = np.outer(poisson.pmf(goals, lam_home), poisson.pmf(goals, lam_away))
+    return dixon_coles_correction(matrix, lam_home, lam_away, rho)
 
 
 def outcome_probs(matrix: np.ndarray) -> dict[str, float]:
@@ -100,14 +137,14 @@ def result_from_goals(home_goals: int, away_goals: int) -> str:
     return "D"
 
 
-def predict_match(home_model: Pipeline, away_model: Pipeline, X: pd.DataFrame) -> pd.DataFrame:
+def predict_match(home_model: Pipeline, away_model: Pipeline, X: pd.DataFrame, rho: float = DEFAULT_RHO) -> pd.DataFrame:
     """Predict lambdas, modal scoreline, and 3-way probs for one or more fixtures."""
     lam_h = home_model.predict(X)
     lam_a = away_model.predict(X)
 
     rows = []
     for lh, la in zip(lam_h, lam_a):
-        mat = score_matrix(lh, la)
+        mat = score_matrix(lh, la, rho=rho)
         probs = outcome_probs(mat)
         h, a, p_score = most_likely_score(mat)
         top = top_scorelines(mat, n=3)
