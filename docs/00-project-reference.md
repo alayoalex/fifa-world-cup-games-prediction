@@ -1,238 +1,186 @@
 # WC 2026 Match Prediction — Project Reference
 
-Quick reference for understanding and running this repository. Setup instructions use **uv**.
+Complete guide for running this repository locally. Setup uses **uv**.
+
+**Last updated:** 2026-06-06 — personal/local mode, fully operational.
 
 ---
 
 ## What this project is
 
-A **data science project to predict international football match outcomes**, focused on the **2026 FIFA World Cup**.
+A **local machine learning system** to predict international football matches, focused on the **2026 FIFA World Cup**.
 
-The goal is to estimate the probability of **home win / draw / away win** (W/D/L, labeled `H` / `D` / `A` in the code).
+It estimates:
 
-**Personal / local use (recommended):** everything runs on your machine. Predictions land in local CSV/Parquet files. No API, no cloud tracking, no data sent to third-party services.
+- **3-way outcome** — home win / draw / away win (`H` / `D` / `A`)
+- **Exact scorelines** — via bivariate Poisson (`2x0`, `1x1`, …)
+- **Ensemble prediction** — blend of logistic + Poisson (recommended for 3-way)
 
-This is not a single notebook experiment. It follows a full ML lifecycle:
-
-```
-ETL → feature store → models → local predictions / optional MLflow UI
-```
-
----
-
-## Core idea
-
-Use historical international match data (~48k matches since 1872), FIFA rankings, Elo ratings, recent form, head-to-head stats, squad market value, and more to predict World Cup 2026 fixtures.
-
-**Critical constraint:** all validation is **temporal** (walk-forward by year). Random K-fold is forbidden — it would let the model see the future and inflate metrics.
-
----
-
-## Project phases
-
-| Phase | Purpose | Status |
-|-------|---------|--------|
-| 1. Problem definition | Target W/D/L, metrics (log-loss, Brier, accuracy) | Documented in [`01-project-general.md`](./01-project-general.md) |
-| 2. Data pipeline | Download, clean, unify team names, build leakage-safe features | **Implemented** — `src/etl/`, `src/features/` |
-| 3. Experiment tracking | Log runs, per-fold metrics, artifacts | **Implemented** — MLflow (docs originally mention W&B; code uses MLflow) |
-| 4. Modeling | Baselines → logistic → XGBoost → Poisson → ensemble | **Partial** — baselines + logistic regression done |
-| 5. Deployment | FastAPI + Postgres + Next.js frontend | **Optional** — not needed for personal use |
-
-### High-level flow (personal mode)
+Everything runs on your machine. Predictions are written to local CSV/Parquet files. **No data is sent to external services** after the optional initial download.
 
 ```
-Public data (download once) → local ETL → feature store → model → CSV predictions on disk
+ETL → feature store → models → CSV / Streamlit UI
 ```
 
 ---
 
-## Data sources
+## Quick start
 
-| Source | Content | Role |
-|--------|---------|------|
-| **martj42/international_results** | ~48k international matches (1872 → present) | **Backbone** — Elo, form, H2H |
-| **FIFA rankings** | Historical rank by date | `fifa_rank_diff` feature |
-| **World Cup matches** (jfjelstul) | WC metadata, squads, standings | Tournament context |
-| **2026 fixtures** | Scheduled WC 2026 matches | Prediction targets |
-| **Transfermarkt** (scraped) | Squad market value | Optional; fragile if bot-blocked |
-| **Elo** | Computed in-house | Reproducible; no external scrape |
+### First time (double-click on Windows)
 
-### Key features per match
+```
+bat-sync.bat      → install dependencies
+bat-setup.bat     → download data + build feature store
+bat-run_ui.bat    → open the app in your browser
+```
 
-- `elo_diff`, `elo_exp_home` — Elo rating differential and expected home score
-- `form_pts_*`, `form_gf_*`, `form_ga_*` — recent form with exponential decay
-- `fifa_rank_diff` — FIFA ranking gap
-- `h2h_home_winrate` — head-to-head history
-- `rest_days_diff` — days since each team's last match
-- `mv_log_ratio` — squad market value ratio (when available)
-- `neutral`, `same_confederation` — venue and confederation flags
+### First time (terminal)
 
-**Targets:** `result` (`H` / `D` / `A`), `home_goals`, `away_goals`
+```bash
+uv sync
+uv run python src/etl/make_dataset.py --skip-scrape
+uv run streamlit run src/ui/app.py
+```
 
-See [`02-project-data-pipeline.md`](./02-project-data-pipeline.md) for pipeline design details.
+In the UI: click **Refresh all predictions**.
+
+### Daily use
+
+| Goal | Action |
+|------|--------|
+| Open the app | `bat-run_ui.bat` or `uv run streamlit run src/ui/app.py` |
+| Refresh predictions | UI → **Refresh all predictions** |
+| Update after matchday | UI → **Full tournament refresh** or `bat-refresh_offline.bat` (no download) |
+| Custom match (Spain vs Brazil) | UI → **Custom matches** tab, or `add_fixture.py` |
+
+---
+
+## Windows batch files (`bat-*.bat`)
+
+Commands that are **not** tied to the Streamlit UI:
+
+| File | Command |
+|------|---------|
+| `bat-run_ui.bat` | Start Streamlit UI |
+| `bat-sync.bat` | `uv sync` — install/update dependencies |
+| `bat-setup.bat` | `uv sync` + `make_dataset.py --skip-scrape` (first-time setup) |
+| `bat-refresh_offline.bat` | Rebuild features + predict **without internet** |
+| `bat-mlflow_ui.bat` | Open local MLflow experiment viewer |
+
+Predictions, tournament refresh, and custom fixtures are available **inside the UI**.
+
+---
+
+## Streamlit UI
+
+```bash
+uv run streamlit run src/ui/app.py
+```
+
+Default URL: `http://localhost:8501`
+
+| Tab | Features |
+|-----|----------|
+| **WC 2026 fixtures** | Ensemble predictions, scorelines, charts; refresh all / full tournament refresh |
+| **Custom matches** | Add hypothetical fixtures, predict, remove |
+| **Team explorer** | Elo, form, FIFA rank, Elo history chart |
+
+Sidebar shows dataset status and maps UI buttons to CLI commands.
+
+---
+
+## Models (implemented)
+
+| Model | Script | Role |
+|-------|--------|------|
+| Baselines | `src/models/baseline.py` | Elo + majority class — must be beaten |
+| Logistic | `src/models/logistic.py` | 3-way classifier (log-loss ~0.85) |
+| Poisson | `src/models/poisson.py` | Expected goals + scorelines (MAE ~1.05 / 0.85) |
+| **Ensemble** | `src/models/ensemble.py` | 55% logistic + 45% Poisson (log-loss ~0.853) |
+
+### Recommended prediction command
+
+```bash
+uv run python src/models/predict_all.py           # WC 2026
+uv run python src/models/predict_all.py --custom  # custom fixtures
+```
+
+**Primary output:** `data/processed/wc2026_predictions_full.csv`
+
+Key columns:
+
+| Column | Meaning |
+|--------|---------|
+| `pred_home_goals`, `pred_away_goals` | Modal score as integers (Excel-safe) |
+| `predicted_score` | Score as `2x0` format (avoids Excel date parsing) |
+| `score_result` | `H`/`D`/`A` from the modal scoreline |
+| `ensemble_pick`, `ensemble_p_H/D/A` | **Recommended 3-way prediction** |
+| `logreg_pick`, `poisson_pick` | Individual model picks |
+| `lambda_home`, `lambda_away` | Expected goals |
+| `top_scores` | Top 3 scorelines with probabilities |
+
+### Tournament refresh
+
+```bash
+uv run python src/etl/refresh_tournament.py --skip-scrape              # download + rebuild + predict
+uv run python src/etl/refresh_tournament.py --skip-download --skip-scrape  # offline
+```
+
+### Custom hypothetical matches
+
+```bash
+uv run python src/etl/add_fixture.py add --home Spain --away Brazil --predict
+uv run python src/etl/add_fixture.py list
+uv run python src/etl/add_fixture.py remove --id <fixture_id> --rebuild
+```
+
+If the fixture already exists, `add ... --predict` skips the duplicate and re-predicts.
+
+**Output:** `data/processed/custom_predictions_full.csv`
+
+---
+
+## Data pipeline
+
+```bash
+uv run python src/etl/make_dataset.py
+```
+
+| Flag | Effect |
+|------|--------|
+| `--skip-download` | Reuse cached martj42 CSVs |
+| `--skip-scrape` | Skip Transfermarkt (recommended; `mv_log_ratio` will be empty) |
+| `--force` | Re-download martj42 even if cached |
+
+**Auto-downloads on first run** (no manual files needed):
+
+- martj42 international results
+- Dato-Futbol FIFA rankings → `fifa_mens_rank.csv`
+- jfjelstul World Cup matches
+
+**Pipeline outputs** (`data/processed/`):
+
+- `matches_features.parquet` — feature store (~49k matches + 72 WC 2026 fixtures)
+- `elo_history.parquet` — per-team Elo timeline
+- `data_dictionary.md` — column docs
 
 ---
 
 ## Repository layout
 
 ```
+bat-*.bat                 # Windows launchers (UI, setup, offline refresh)
 data/
-  raw/          # Downloaded sources (immutable, not in git)
-  interim/      # Cleaned per-source tables
-  processed/    # Feature store (parquet) — generated by the pipeline
-
+  raw/                    # Downloaded sources (gitignored)
+  interim/                # Cleaned tables + custom_fixtures.parquet
+  processed/              # Feature store + prediction CSVs
 src/
-  etl/          # Data ingestion and canonical match table
-  features/     # Leakage-safe feature engineering
-  models/       # Training, baselines, evaluation
-  visualization/
-
-mlflow/         # Local experiment tracking (SQLite + artifacts)
-
-docs/           # Project documentation
-notebooks/      # Exploration notebooks
-```
-
-**Note:** `data/` is empty on clone. Run the pipeline to generate it.
-
----
-
-## What is implemented today
-
-### Working code
-
-| Script | Purpose |
-|--------|---------|
-| `src/etl/make_dataset.py` | Full Phase 2 pipeline (download → features) |
-| `src/features/build_features.py` | Leakage-safe feature store |
-| `src/models/splits.py` | Temporal walk-forward CV folds |
-| `src/models/baseline.py` | Baselines: class majority + Elo |
-| `src/models/logistic.py` | Multinomial logistic regression + MLflow |
-| `src/models/predict_fixtures.py` | **Local WC predictions → CSV** (no network) |
-| `src/models/tracking.py` | MLflow configuration (optional, local SQLite) |
-
-### Stubs / not yet implemented
-
-| Item | Status |
-|------|--------|
-| `src/models/train_model.py` | Template stub |
-| `src/models/predict_model.py` | Template stub |
-| XGBoost, Poisson, ensemble | Described in docs, not in code |
-| API / web deployment | Strategy only |
-
-### Pipeline outputs (`data/processed/`)
-
-- `matches_features.parquet` — model-ready feature store (played matches + 2026 fixtures)
-- `elo_history.parquet` — per-team Elo time series
-- `data_dictionary.md` — column documentation
-
----
-
-## Setup with uv
-
-Prerequisites: [uv](https://docs.astral.sh/uv/) installed.
-
-```bash
-# From the repo root — creates .venv and installs deps from pyproject.toml
-uv sync
-```
-
-All commands below can be run with `uv run` (uses the project venv automatically):
-
-```bash
-uv run python src/etl/make_dataset.py
-uv run python src/models/baseline.py
-uv run python src/models/logistic.py
-```
-
-### Alternative: install from requirements.txt
-
-If you prefer the flat requirements file:
-
-```bash
-uv venv
-uv pip install -r requirements.txt
-```
-
----
-
-## Running the pipeline
-
-### 1. Build the dataset
-
-Downloads data from the internet and builds the feature store:
-
-```bash
-uv run python src/etl/make_dataset.py
-```
-
-**Options:**
-
-```bash
-uv run python src/etl/make_dataset.py --skip-download   # reuse cached martj42 CSVs
-uv run python src/etl/make_dataset.py --skip-scrape     # skip Transfermarkt scrape
-uv run python src/etl/make_dataset.py --force           # re-download martj42 even if cached
-```
-
-**Pipeline steps (7):**
-
-1. Download international results (martj42)
-2. Clean FIFA ranking
-3. Clean World Cup matches (jfjelstul)
-4. Extract 2026 fixtures
-5. Scrape national-team market values (Transfermarkt)
-6. Build canonical match table
-7. Engineer leakage-safe features
-
-### 2. Inspect temporal CV folds
-
-```bash
-uv run python src/models/splits.py
-```
-
-### 3. Run baselines
-
-Every model must beat these:
-
-```bash
-uv run python src/models/baseline.py
-```
-
-- `baseline-majority` — predict training-fold class base rates
-- `baseline-elo` — Elo expected score → 3-way probabilities
-
-### 4. Train the first real model
-
-```bash
-uv run python src/models/logistic.py
-```
-
-Logs per-fold metrics, calibration plot, confusion matrix, and registers the model as `wc2026-logreg` in MLflow.
-
-### 5. View experiments
-
-```bash
-uv run mlflow ui --backend-store-uri "sqlite:///mlflow/mlflow.db"
-```
-
-Open the URL printed in the terminal (default `http://127.0.0.1:5000`). **Optional** — skip this entirely if you only want CSV predictions.
-
-### 6. Predict World Cup fixtures locally (main personal workflow)
-
-After the dataset exists, generate predictions without contacting any external service:
-
-```bash
-uv run python src/models/predict_fixtures.py
-```
-
-**Output:** `data/processed/wc2026_predictions.csv` with columns `date`, teams, `p_H`, `p_D`, `p_A`, `predicted`, `confidence`.
-
-```bash
-# Custom output path
-uv run python src/models/predict_fixtures.py --output data/processed/my_preds.csv
-
-# Every unplayed match in the corpus (not only WC 2026)
-uv run python src/models/predict_fixtures.py --all-unplayed
+  etl/                    # Pipeline, add_fixture, refresh_tournament
+  features/               # Leakage-safe feature engineering
+  models/                 # baselines, logistic, poisson, ensemble, predict_all
+  ui/app.py               # Streamlit app
+mlflow/                   # Local experiment tracking (optional)
+docs/                     # Project documentation
 ```
 
 ---
@@ -241,178 +189,94 @@ uv run python src/models/predict_fixtures.py --all-unplayed
 
 ### What stays on your machine
 
-| Component | Where it lives | Sends data out? |
-|-----------|----------------|-----------------|
-| Feature store | `data/processed/*.parquet` | No |
-| Predictions | `data/processed/wc2026_predictions.csv` | No |
-| MLflow (optional) | `mlflow/mlflow.db` (local SQLite) | No |
-| Trained model (in-memory) | Built when you run predict/logistic | No |
+| Component | Location |
+|-----------|----------|
+| Feature store | `data/processed/*.parquet` |
+| Predictions | `data/processed/*_predictions_full.csv` |
+| MLflow (optional) | `mlflow/mlflow.db` |
+| Custom fixtures | `data/interim/custom_fixtures.parquet` |
 
-### What touches the internet (one-time download)
+### What uses the internet
 
-Only `make_dataset.py` fetches **public** datasets from GitHub:
+Only `make_dataset.py` / `refresh_tournament.py` (without `--skip-download`) fetch public GitHub data. All modeling and prediction runs offline afterward.
 
-- martj42 international results
-- Dato-Futbol FIFA rankings (saved as `fifa_mens_rank.csv`)
-- jfjelstul World Cup matches
+---
 
-Transfermarkt scrape is optional. After the first run, baselines, training, and predictions work **fully offline** with `--skip-download`.
+## Evaluation metrics (temporal CV, verified)
 
-To minimize external requests:
+| Model | Log-loss | Accuracy |
+|-------|----------|----------|
+| Baseline Elo | 0.95 | 60.5% |
+| Logistic | 0.85 | 61.1% |
+| Poisson (3-way from score matrix) | 0.86 | 60.8% |
+| **Ensemble** | **0.853** | **61.1%** |
 
-```bash
-uv run python src/etl/make_dataset.py --skip-scrape      # skip Transfermarkt
-uv run python src/etl/make_dataset.py --skip-download    # reuse cached CSVs
-```
+Metrics use **walk-forward validation by year** — no random K-fold (prevents temporal leakage).
 
-You can ignore Phase 5 (API / website) and MLflow entirely.
+---
 
-### Use cases
-
-| # | Use case | What you do | Output |
-|---|----------|-------------|--------|
-| 1 | **Predict WC 2026 matches** | `make_dataset.py` → `predict_fixtures.py` | CSV with H/D/A probabilities per fixture |
-| 2 | **Follow the tournament** | Re-run `make_dataset.py` after results update, then `predict_fixtures.py` again | Updated predictions with fresh form/Elo |
-| 3 | **Compare team strength** | Open `elo_history.parquet` or filter `matches_features.parquet` | Elo, form, FIFA rank per team |
-| 4 | **Evaluate model quality** | `baseline.py` → `logistic.py` → compare log-loss / Brier | Metrics in terminal + optional MLflow UI |
-| 5 | **Explore in a notebook** | `notebooks/00-template.ipynb` + local Parquet files | Charts, ad-hoc analysis |
-| 6 | **Learn sports ML patterns** | Read `docs/`, study temporal CV in `splits.py` | Understanding leakage-safe pipelines |
-| 7 | **Backtest on history** | Filter `played == True` in a notebook; reuse `temporal_folds()` | Simulated past-season performance |
-
-### Recommended personal workflow
-
-```bash
-uv sync
-uv run python src/etl/make_dataset.py --skip-scrape   # first run: downloads from GitHub
-uv run python src/models/predict_fixtures.py          # your predictions CSV
-```
-
-Verified end-to-end (2026-06-06): 49,411 matches, 72 WC 2026 fixtures, logistic beats Elo baseline (log-loss 0.85 vs 0.95).
-
-Optional, if you care about model quality:
+## Optional: experiment tracking
 
 ```bash
 uv run python src/models/baseline.py
 uv run python src/models/logistic.py
+uv run python src/models/poisson.py
+uv run python src/models/ensemble.py
+uv run mlflow ui --backend-store-uri "sqlite:///mlflow/mlflow.db"
+# or: bat-mlflow_ui.bat
 ```
 
-### Custom hypothetical matches
+---
 
-Add any pairing of known national teams, rebuild features, and predict locally:
+## Excel tip
 
-```bash
-uv run python src/etl/add_fixture.py add --home Spain --away Brazil --predict
-uv run python src/etl/add_fixture.py add --home Argentina --away France --date 2026-07-15
-uv run python src/etl/add_fixture.py list
-uv run python src/etl/add_fixture.py predict
-uv run python src/etl/add_fixture.py remove --id <fixture_id> --rebuild
-```
+Do **not** rely on `2-0` score strings — Excel converts them to dates (`feb-00`).
 
-**Output:** `data/processed/custom_predictions.csv`
+Use instead:
 
-Team names are validated against the martj42 vocabulary (aliases like `USA` → `United States` work). Default match date is the day after the latest played match in the corpus.
+- `predicted_score` → `2x0` format
+- `pred_home_goals` + `pred_away_goals` → integer columns
 
-### Local UI (Streamlit)
+---
 
-Interactive browser UI — still 100% local:
+## Project phases (status)
+
+| Phase | Status |
+|-------|--------|
+| 1. Problem definition | ✅ Documented |
+| 2. Data pipeline | ✅ Implemented + auto-download |
+| 3. Experiment tracking | ✅ MLflow (local) |
+| 4. Modeling | ✅ Baselines, logistic, Poisson, ensemble |
+| 5. Deployment (API/web) | ⏭️ Not needed for personal use |
+| UI | ✅ Streamlit |
+| Windows launchers | ✅ `bat-*.bat` |
+
+---
+
+## Future extensions (not implemented)
+
+- XGBoost / LightGBM + Optuna
+- Dixon-Coles Poisson variant
+- Transfermarkt market value (when scrape works)
+- Scheduled auto-refresh (cron / Task Scheduler)
+- Public API deployment
+
+---
+
+## Command cheat sheet
 
 ```bash
 uv sync
-uv run streamlit run src/ui/app.py
-```
-
-Tabs: WC 2026 predictions, custom hypothetical matches, team Elo explorer.
-
-### Unified predictions (recommended)
-
-Single command — logistic + Poisson + **ensemble** in one CSV:
-
-```bash
+uv run python src/etl/make_dataset.py --skip-scrape
 uv run python src/models/predict_all.py
-uv run python src/models/predict_all.py --custom
-```
-
-**Output:** `data/processed/wc2026_predictions_full.csv` with scorelines, per-model picks, and `ensemble_pick` / `ensemble_p_*`.
-
-### Tournament refresh (during the World Cup)
-
-After each matchday, pull latest results and regenerate everything:
-
-```bash
 uv run python src/etl/refresh_tournament.py --skip-scrape
-uv run python src/etl/refresh_tournament.py --skip-download --skip-scrape   # offline
-```
-
-### Ensemble model
-
-Blends logistic (55%) + Poisson outcome probs (45%) by default:
-
-```bash
-uv run python src/models/ensemble.py   # optional: evaluate temporal CV
-```
-
-### Scoreline predictions (Poisson only)
-
-```bash
-uv run python src/models/poisson.py
-uv run python src/models/predict_scores.py
-```
-
-`predicted_result` now matches the modal scoreline (`1-1` → `D`). `outcome_pick` is the aggregated 3-way max.
-
----
-
-## Evaluation metrics
-
-| Metric | Why it matters |
-|--------|----------------|
-| **Log-loss** | Canonical metric; penalizes poorly calibrated probabilities |
-| **Brier score** | Multiclass calibration quality |
-| **Accuracy** | Easy to read, but less informative than log-loss |
-
-Baselines to beat: always pick the Elo favorite, or always predict the training-set majority class.
-
----
-
-## Planned roadmap (optional extensions)
-
-1. **XGBoost / LightGBM** with Optuna hyperparameter sweeps
-2. **Poisson / Dixon-Coles** for goal-based predictions (exact scores)
-3. **Ensemble** — weighted average or stacking
-4. **Deployment** — only if you later want a public API (not required for personal use)
-5. **Retraining loop** — manual today: re-run pipeline + `predict_fixtures.py` after each matchday
-
-See [`01-project-general.md`](./01-project-general.md) and [`sports-ml-models.md`](./sports-ml-models.md) for the full strategy.
-
----
-
-## Known limitations
-
-- **No raw data in the repo** — you must run the pipeline (requires internet).
-- **Transfermarkt scraping** may fail; use `--skip-scrape` if blocked.
-- **Deployment is not built yet** — today this is a modeling + experimentation project.
-- **README.md** is a generic DS template; this doc and `docs/` are the real project docs.
-
----
-
-## Quick command cheat sheet
-
-```bash
-uv sync                                              # install deps
-uv run python src/etl/make_dataset.py                # build dataset (downloads once)
-uv run python src/models/predict_all.py              # unified predictions (recommended)
-uv run python src/etl/refresh_tournament.py --skip-scrape  # tournament refresh
-uv run python src/models/ensemble.py                 # optional: evaluate ensemble
-uv run python src/models/baseline.py                 # optional: baselines
-uv run python src/models/logistic.py                 # optional: train + MLflow log
-uv run mlflow ui --backend-store-uri "sqlite:///mlflow/mlflow.db"  # optional UI
-uv run streamlit run src/ui/app.py                  # local browser UI
+uv run streamlit run src/ui/app.py
 ```
 
 ---
 
 ## Related docs
 
-- [`01-project-general.md`](./01-project-general.md) — full 5-phase strategy
-- [`02-project-data-pipeline.md`](./02-project-data-pipeline.md) — data pipeline design
-- [`sports-ml-models.md`](./sports-ml-models.md) — ML model landscape for sports prediction
+- [`01-project-general.md`](./01-project-general.md) — original 5-phase strategy
+- [`02-project-data-pipeline.md`](./02-project-data-pipeline.md) — pipeline design
+- [`sports-ml-models.md`](./sports-ml-models.md) — sports ML model landscape
