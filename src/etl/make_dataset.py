@@ -39,11 +39,13 @@ def _step(n: int, total: int, title: str) -> None:
 def main(skip_download: bool = False, skip_scrape: bool = False, force: bool = False) -> None:
     total = 7
 
-    _step(1, total, "Download international results (martj42)")
+    _step(1, total, "Download raw sources")
     if skip_download:
-        print("[make_dataset] --skip-download: using cached CSVs")
+        print("[make_dataset] --skip-download: using cached raw files where present")
     else:
         international_results.download(force=force)
+        fifa_ranking.download(force=force)
+        worldcup_matches.download(force=force)
 
     _step(2, total, "Clean FIFA ranking")
     fifa_ranking.refresh()

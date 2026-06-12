@@ -1,89 +1,45 @@
-# Data Science Project Template
+# FIFA World Cup 2026 — Match Prediction
 
-problem → approach → demo → impact
+Local ML system to predict international football matches: 3-way outcomes, exact scorelines, and ensemble predictions for the 2026 World Cup.
 
-A standardized folder structure for data science projects covering the complete project lifecycle.
+**Runs entirely on your machine** — no cloud, no data sent to third parties.
 
-## Project Structure
+## Quick start (Windows)
 
 ```
-├── data/
-│   ├── raw/              # Original, immutable data dump
-│   ├── interim/          # Intermediate data that has been transformed
-│   ├── processed/        # Final, canonical data sets for modeling
-│   └── external/         # Data from third party sources
-│
-├── notebooks/            # Jupyter notebooks for exploration and analysis
-│                         # Naming convention: number-initials-description.ipynb
-│                         # Example: 1.0-jqp-initial-data-exploration.ipynb
-│
-├── src/                 # Source code for use in this project
-│   ├── data/            # Scripts to download or generate data
-│   ├── features/        # Scripts for feature engineering
-│   ├── models/          # Scripts to train models and make predictions
-│   └── visualization/   # Scripts to create visualizations
-│
-├── smodels/             # Trained and serialized models
-│   ├── trained/         # Saved model files (.pkl, .h5, .pt, etc.)
-│   └── predictions/     # Model predictions and scores
-│
-├── reports/             # Generated analysis as HTML, PDF, LaTeX, etc.
-│   └── figures/         # Generated graphics and figures for reporting
-│
-├── tests/               # Unit tests and integration tests
-│
-├── configs/             # Configuration files (hyperparameters, paths, etc.)
-│
-├── docs/                # Project documentation
-│
-├── requirements.txt     # Python package dependencies
-│
-└── README.md            # Project overview and instructions
+bat-sync.bat      → install dependencies
+bat-setup.bat     → build dataset (first time)
+bat-run_ui.bat    → open the app
 ```
 
-## Data Science Lifecycle Coverage
+## Quick start (terminal)
 
-This structure supports all major phases:
+```bash
+uv sync
+uv run python src/etl/make_dataset.py --skip-scrape
+uv run streamlit run src/ui/app.py
+```
 
-1. **Data Collection** → `data/raw/`, `data/external/`, `src/data/`
-2. **Data Exploration** → `notebooks/`, `reports/figures/`
-3. **Data Preprocessing** → `data/interim/`, `data/processed/`, `src/data/`
-4. **Feature Engineering** → `src/features/`
-5. **Model Development** → `notebooks/`, `src/models/`
-6. **Model Training** → `src/models/`, `models/trained/`
-7. **Model Evaluation** → `smodels/predictions/`, `reports/`
-8. **Documentation** → `docs/`, `reports/`
-9. **Testing** → `tests/`
-10. **Deployment** → `src/models/`, `configs/`
+Then click **Refresh all predictions** in the UI.
 
-## Getting Started
+## What you get
 
-1. Install dependencies:
-   ```bash
-   python -m venv .venv
-   .venv\Scripts\Activate.ps1
-   pip install -r requirements.txt
-   ```
+- **72 WC 2026 group-stage fixtures** with H/D/A probabilities
+- **Exact scorelines** (Poisson: `2x0`, `1x1`, …)
+- **Ensemble model** (logistic + Poisson blend)
+- **Custom hypothetical matches** (e.g. Spain vs Brazil)
+- **Team explorer** (Elo, form, FIFA rank)
 
-2. Add your raw data to `data/raw/`
+Primary output: `data/processed/wc2026_predictions_full.csv`
 
-3. Start exploring in `notebooks/`
+## Documentation
 
-4. Use `notebooks/00-template.ipynb` as a starting point
+Full reference (setup, models, UI, batch files, workflows):
 
-5. Move production code to `src/`
+**[docs/00-project-reference.md](docs/00-project-reference.md)**
 
-## Best Practices
+Additional design docs in `docs/`.
 
-- Keep raw data immutable - never edit files in `data/raw/`
-- Use notebooks for exploration, move production code to `src/`
-- Version control your code, not your data
-- Document your process in notebooks and `docs/`
-- Use meaningful names and maintain a consistent structure
+## Stack
 
-Next Steps
-
-  1. Install dependencies: pip install -r requirements.txt
-  2. Add your raw data to data/raw/
-  3. Use notebooks/00-template.ipynb as a starting point
-  4. Move production-ready code from notebooks to src/
+Python · uv · pandas · scikit-learn · Streamlit · MLflow (local, optional)

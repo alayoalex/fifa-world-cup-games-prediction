@@ -13,6 +13,7 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from etl import custom_fixtures  # noqa: E402
 from etl.paths import INTERIM_DIR, INTL_RESULTS_DIR  # noqa: E402
 from etl.team_names import standardize_series  # noqa: E402
 
@@ -59,22 +60,29 @@ def build() -> pd.DataFrame:
     df["is_world_cup"] = df["tournament"] == "FIFA World Cup"
     df["neutral"] = df["neutral"].astype("boolean")
 
-    df = df.sort_values("date", kind="stable").reset_index(drop=True)
-    df.insert(0, "match_id", df.index + 1)
-
     cols = [
-        "match_id", "date", "home_team", "away_team",
+        "date", "home_team", "away_team",
         "home_score", "away_score", "result", "played",
         "neutral", "tournament", "competition_type", "is_world_cup",
         "city", "country",
     ]
     out = df[cols]
+
+    custom = custom_fixtures.to_match_rows()
+    if not custom.empty:
+        out = pd.concat([out, custom], ignore_index=True)
+
+    out = out.sort_values("date", kind="stable").reset_index(drop=True)
+    out.insert(0, "match_id", out.index + 1)
+
     out.to_parquet(OUT, index=False)
 
     played = out["played"].sum()
+    n_custom = int((out["tournament"] == custom_fixtures.CUSTOM_TOURNAMENT).sum())
     print(f"[matches] {len(out):,} matches "
           f"({out['date'].min().date()} -> {out['date'].max().date()}), "
-          f"{played:,} played, {len(out) - played} future fixtures -> {OUT.name}")
+          f"{played:,} played, {len(out) - played} future fixtures "
+          f"({n_custom} custom) -> {OUT.name}")
     print("  competition_type:", out["competition_type"].value_counts().to_dict())
     return out
 
